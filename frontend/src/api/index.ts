@@ -168,10 +168,31 @@ export interface CourseProgressStats {
   total_tasks_count: number;
 }
 
+export interface CourseNodeContent {
+  id: number;
+  node_id: number;
+  title: string;
+  content: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export const courseStudentApi = {
   getTree: (courseId: number) => api.get<CourseNodeTree[]>(`/courses/${courseId}/tree`),
   getNodeTasks: (nodeId: number) => api.get<NodeTaskProgress[]>(`/nodes/${nodeId}/tasks`),
+  getNodeContent: (nodeId: number) => api.get<CourseNodeContent[]>(`/nodes/${nodeId}/content`),
   getProgress: (courseId: number) => api.get<CourseProgressStats>(`/courses/${courseId}/progress`),
+};
+
+export const adminNodeContentApi = {
+  list: (nodeId: number) => api.get<CourseNodeContent[]>(`/admin/courses/nodes/${nodeId}/content`),
+  create: (nodeId: number, data: { title: string; content: string; sort_order?: number }) =>
+    api.post<CourseNodeContent>(`/admin/courses/nodes/${nodeId}/content`, data),
+  update: (nodeId: number, contentId: number, data: Partial<{ title: string; content: string; sort_order: number }>) =>
+    api.patch<CourseNodeContent>(`/admin/courses/nodes/${nodeId}/content/${contentId}`, data),
+  delete: (nodeId: number, contentId: number) =>
+    api.delete(`/admin/courses/nodes/${nodeId}/content/${contentId}`),
 };
 
 export const submissionsApi = {

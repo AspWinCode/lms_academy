@@ -72,3 +72,10 @@ class CourseNode(Base):
         cascade="all, delete-orphan",
         order_by="CourseNodeTask.sort_order",
     )
+
+    content_items = relationship(
+        "CourseNodeContent",
+        back_populates="node",
+        cascade="all, delete-orphan",
+        order_by="CourseNodeContent.sort_order",
+    )

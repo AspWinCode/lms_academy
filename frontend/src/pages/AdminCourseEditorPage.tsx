@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import {
   adminCoursesApi,
+  adminNodeContentApi,
   type AdminCourse,
+  type CourseNodeContent,
   type CourseNodeDetails,
   type CourseNodeStatus,
   type CourseNodeTask,
@@ -47,9 +49,14 @@ export default function AdminCourseEditorPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<CourseNodeDetails | null>(null);
   const [nodeTasks, setNodeTasks] = useState<CourseNodeTask[]>([]);
+  const [nodeContent, setNodeContent] = useState<CourseNodeContent[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Форма создания/редактирования лекции
+  const [contentForm, setContentForm] = useState<{ title: string; content: string } | null>(null);
+  const [editingContentId, setEditingContentId] = useState<number | null>(null);
 
   // Форма создания узла
   const [createForm, setCreateForm] = useState<CreateNodeForm | null>(null);
@@ -75,12 +82,14 @@ export default function AdminCourseEditorPage() {
 
   const loadNode = async (nodeId: number) => {
     try {
-      const [nodeRes, tasksRes] = await Promise.all([
+      const [nodeRes, tasksRes, contentRes] = await Promise.all([
         adminCoursesApi.getNode(nodeId),
         adminCoursesApi.getNodeTasks(nodeId),
+        adminNodeContentApi.list(nodeId),
       ]);
       setSelectedNode(nodeRes.data);
       setNodeTasks(tasksRes.data);
+      setNodeContent(contentRes.data);
     } catch (e: any) {
       setError(e.response?.data?.detail || e.message || 'Ошибка загрузки узла');
     }
@@ -227,6 +236,43 @@ export default function AdminCourseEditorPage() {
       await loadCourse();
     } catch (e: any) {
       setError(e.response?.data?.detail || e.message || 'Ошибка удаления задачи');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Лекционные материалы ────────────────────────────────────────────────────
+  const handleSaveContent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedNode || !contentForm) return;
+    setSaving(true);
+    try {
+      if (editingContentId != null) {
+        await adminNodeContentApi.update(selectedNode.id, editingContentId, contentForm);
+      } else {
+        await adminNodeContentApi.create(selectedNode.id, {
+          ...contentForm,
+          sort_order: nodeContent.length,
+        });
+      }
+      setContentForm(null);
+      setEditingContentId(null);
+      await loadNode(selectedNode.id);
+    } catch (e: any) {
+      setError(e.response?.data?.detail || e.message || 'Ошибка сохранения лекции');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteContent = async (contentId: number) => {
+    if (!selectedNode || !confirm('Удалить лекционный материал?')) return;
+    setSaving(true);
+    try {
+      await adminNodeContentApi.delete(selectedNode.id, contentId);
+      await loadNode(selectedNode.id);
+    } catch (e: any) {
+      setError(e.response?.data?.detail || e.message || 'Ошибка удаления');
     } finally {
       setSaving(false);
     }
@@ -573,6 +619,93 @@ export default function AdminCourseEditorPage() {
                   </button>
                 </div>
               )}
+
+              {/* Блок лекционных материалов */}
+              <div className="pt-4 border-t border-surface-200">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold text-sm">📖 Лекционные материалы</h3>
+                  {!contentForm && (
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      onClick={() => {
+                        setContentForm({ title: '', content: '' });
+                        setEditingContentId(null);
+                      }}
+                    >
+                      + Добавить
+                    </button>
+                  )}
+                </div>
+
+                {nodeContent.length === 0 && !contentForm && (
+                  <div className="text-sm text-surface-400 mb-2">Нет лекционных материалов.</div>
+                )}
+
+                <ul className="space-y-1 mb-3">
+                  {nodeContent.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between text-sm gap-2 bg-surface-50 rounded px-2 py-1.5">
+                      <span className="truncate flex-1 font-medium">{c.title}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          className="text-xs text-primary-600 hover:underline"
+                          onClick={() => {
+                            setContentForm({ title: c.title, content: c.content });
+                            setEditingContentId(c.id);
+                          }}
+                        >
+                          ✏️ Редактировать
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs text-red-600 hover:underline"
+                          onClick={() => handleDeleteContent(c.id)}
+                          disabled={saving}
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+
+                {contentForm && (
+                  <form onSubmit={handleSaveContent} className="space-y-2 border border-primary-200 rounded p-3 bg-primary-50">
+                    <div className="text-xs font-semibold text-primary-700 mb-1">
+                      {editingContentId != null ? 'Редактировать материал' : 'Новый материал'}
+                    </div>
+                    <input
+                      autoFocus
+                      className="input w-full text-sm"
+                      placeholder="Заголовок"
+                      value={contentForm.title}
+                      onChange={(e) => setContentForm({ ...contentForm, title: e.target.value })}
+                      required
+                    />
+                    <textarea
+                      className="input w-full text-sm font-mono"
+                      placeholder="Содержимое (поддерживается Markdown)"
+                      rows={8}
+                      value={contentForm.content}
+                      onChange={(e) => setContentForm({ ...contentForm, content: e.target.value })}
+                      required
+                    />
+                    <div className="flex gap-2">
+                      <button type="submit" className="btn-primary btn-sm" disabled={saving}>
+                        💾 Сохранить
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        onClick={() => { setContentForm(null); setEditingContentId(null); }}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
 
               {/* Блок задач */}
               <div className="pt-4 border-t border-surface-200">

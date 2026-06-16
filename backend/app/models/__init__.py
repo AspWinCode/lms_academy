@@ -1,4 +1,5 @@
 from app.models.achievement import Achievement, UserAchievement
+from app.models.course_node_content import CourseNodeContent
 from app.models.contest import Contest, ContestParticipation, ContestStatus, ContestTask
 from app.models.course import Course, CourseStatus
 from app.models.course_node import CourseNode, CourseNodeStatus, CourseNodeType
@@ -62,4 +63,5 @@ __all__ = [
     "Achievement",
     "UserAchievement",
     "PlatformSetting",
+    "CourseNodeContent",
 ]

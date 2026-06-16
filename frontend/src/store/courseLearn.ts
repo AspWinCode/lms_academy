@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 
 export interface CourseSidebarItem {
-  kind: 'section' | 'task';
+  kind: 'section' | 'task' | 'lecture';
   nodeId: number;
   number: string;
   label: string;
   depth: number;
   taskId?: number;
   nodeTaskId?: number;
+  lectureId?: number;
   status?: 'not_started' | 'in_progress' | 'completed';
 }
 

@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   courseStudentApi,
   coursesApi,
+  type CourseNodeContent,
   type CourseNodeTree,
   type NodeTaskProgress,
 } from '../api';
@@ -27,6 +28,7 @@ function collectNodeIds(nodes: CourseNodeTree[]): number[] {
 function flattenTree(
   nodes: CourseNodeTree[],
   nodeTasks: Record<number, NodeTaskProgress[]>,
+  nodeContent: Record<number, CourseNodeContent[]>,
   prefix = '',
   depth = 0,
 ): CourseSidebarItem[] {
@@ -34,24 +36,92 @@ function flattenTree(
   nodes.forEach((node, idx) => {
     const num = prefix ? `${prefix}.${idx + 1}` : `${idx + 1}`;
     items.push({ kind: 'section', nodeId: node.id, number: num, label: node.title, depth });
-    const tasks = nodeTasks[node.id] ?? [];
-    tasks.forEach((t, ti) => {
-      items.push({
-        kind: 'task',
-        nodeId: node.id,
-        taskId: t.task_id,
-        nodeTaskId: t.node_task_id,
-        number: `${num}.${ti + 1}`,
-        label: t.task_title || `Задача #${t.task_id}`,
-        status: t.status,
-        depth: depth + 1,
-      });
+
+    // Объединяем лекции и задачи, сортируем по sort_order
+    type LectureEntry = { type: 'lecture'; sortOrder: number; data: CourseNodeContent };
+    type TaskEntry = { type: 'task'; sortOrder: number; data: NodeTaskProgress };
+    const combined: (LectureEntry | TaskEntry)[] = [
+      ...(nodeContent[node.id] ?? []).map((c) => ({ type: 'lecture' as const, sortOrder: c.sort_order, data: c })),
+      ...(nodeTasks[node.id] ?? []).map((t, ti) => ({ type: 'task' as const, sortOrder: t.node_task_id, data: t })),
+    ].sort((a, b) => a.sortOrder - b.sortOrder);
+
+    let lectureIdx = 0;
+    let taskIdx = 0;
+    combined.forEach((entry) => {
+      if (entry.type === 'lecture') {
+        lectureIdx++;
+        items.push({
+          kind: 'lecture',
+          nodeId: node.id,
+          lectureId: entry.data.id,
+          number: `${num}.${lectureIdx + taskIdx - 1}`,
+          label: entry.data.title,
+          depth: depth + 1,
+        });
+      } else {
+        taskIdx++;
+        const t = entry.data;
+        items.push({
+          kind: 'task',
+          nodeId: node.id,
+          taskId: t.task_id,
+          nodeTaskId: t.node_task_id,
+          number: `${num}.${lectureIdx + taskIdx - 1}`,
+          label: t.task_title || `Задача #${t.task_id}`,
+          status: t.status,
+          depth: depth + 1,
+        });
+      }
     });
+
     if (node.children.length > 0) {
-      items.push(...flattenTree(node.children, nodeTasks, num, depth + 1));
+      items.push(...flattenTree(node.children, nodeTasks, nodeContent, num, depth + 1));
     }
   });
   return items;
+}
+
+// ── Просмотр лекции ───────────────────────────────────────────────────────────
+function LectureViewer({
+  lecture,
+  lectureNumber,
+  totalItems,
+  onNext,
+  onPrev,
+}: {
+  lecture: CourseNodeContent;
+  lectureNumber: number;
+  totalItems: number;
+  onNext: () => void;
+  onPrev: () => void;
+}) {
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="shrink-0 px-6 py-3 border-b border-surface-100 bg-white flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-lg shrink-0">📖</span>
+          <span className="text-sm font-semibold text-dark-700 truncate">{lecture.title}</span>
+        </div>
+        <span className="text-sm text-surface-400 shrink-0">Шаг {lectureNumber} из {totalItems}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto px-8 py-6">
+        <div className="max-w-3xl mx-auto prose prose-sm">
+          <Markdown content={lecture.content} />
+        </div>
+      </div>
+      <div className="shrink-0 px-6 py-3 border-t border-surface-100 bg-white flex items-center justify-between">
+        <span className="text-xs text-surface-400">Шаг {lectureNumber} из {totalItems}</span>
+        <div className="flex items-center gap-2">
+          <button onClick={onPrev} disabled={lectureNumber <= 1} className="btn-secondary btn-sm disabled:opacity-40">
+            ← Назад
+          </button>
+          <button onClick={onNext} disabled={lectureNumber >= totalItems} className="btn-secondary btn-sm disabled:opacity-40">
+            Вперёд →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Решатель задачи ───────────────────────────────────────────────────────────
@@ -359,20 +429,21 @@ export default function CourseLearnPage() {
   const { courseId } = useParams<{ courseId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [reloadTrigger, setReloadTrigger] = useState(0);
+  const [lectureMap, setLectureMap] = useState<Record<number, CourseNodeContent>>({});
 
   const { setCourseData, setSelectedTaskId, clear } = useCourseLearnStore();
   const selectedTaskId = searchParams.get('task') ? Number(searchParams.get('task')) : null;
+  const selectedLectureId = searchParams.get('lecture') ? Number(searchParams.get('lecture')) : null;
 
   const reloadCourseData = useCallback(() => {
     setReloadTrigger((n) => n + 1);
   }, []);
 
-  // Очистка стора при уходе со страницы курса
   useEffect(() => {
     return () => { clear(); };
   }, []);
 
-  // Загрузка курса + дерева + задач всех узлов
+  // Загрузка курса + дерева + задач + лекций всех узлов
   useEffect(() => {
     if (!courseId) return;
     const id = Number(courseId);
@@ -383,26 +454,49 @@ export default function CourseLearnPage() {
         const tree: CourseNodeTree[] = tRes.data;
         const allNodeIds = collectNodeIds(tree);
 
-        // Параллельно грузим задачи всех узлов
-        const results = await Promise.allSettled(
-          allNodeIds.map((nid) =>
-            courseStudentApi.getNodeTasks(nid).then((r) => ({ nid, tasks: r.data })),
+        // Параллельно грузим задачи и лекции всех узлов
+        const [taskResults, contentResults] = await Promise.all([
+          Promise.allSettled(
+            allNodeIds.map((nid) =>
+              courseStudentApi.getNodeTasks(nid).then((r) => ({ nid, tasks: r.data })),
+            ),
           ),
-        );
+          Promise.allSettled(
+            allNodeIds.map((nid) =>
+              courseStudentApi.getNodeContent(nid).then((r) => ({ nid, content: r.data })),
+            ),
+          ),
+        ]);
+
         const nodeTasks: Record<number, NodeTaskProgress[]> = {};
-        results.forEach((r) => {
+        taskResults.forEach((r) => {
           if (r.status === 'fulfilled') nodeTasks[r.value.nid] = r.value.tasks;
         });
 
-        const items = flattenTree(tree, nodeTasks);
+        const nodeContent: Record<number, CourseNodeContent[]> = {};
+        const allLectures: Record<number, CourseNodeContent> = {};
+        contentResults.forEach((r) => {
+          if (r.status === 'fulfilled') {
+            nodeContent[r.value.nid] = r.value.content;
+            r.value.content.forEach((c) => { allLectures[c.id] = c; });
+          }
+        });
+        setLectureMap(allLectures);
+
+        const items = flattenTree(tree, nodeTasks, nodeContent);
         const taskItems = items.filter((i) => i.kind === 'task');
         const completed = taskItems.filter((i) => i.status === 'completed').length;
 
         setCourseData(id, course.title, items, completed, taskItems.length);
 
-        // Авто-выбор первой задачи (только при первой загрузке)
-        if (reloadTrigger === 0 && !searchParams.get('task') && taskItems.length > 0 && taskItems[0].taskId) {
-          setSearchParams({ task: String(taskItems[0].taskId) }, { replace: true });
+        // Авто-выбор первого шага (лекция или задача) при первой загрузке
+        if (reloadTrigger === 0 && !searchParams.get('task') && !searchParams.get('lecture')) {
+          const firstStep = items.find((i) => i.kind === 'task' || i.kind === 'lecture');
+          if (firstStep?.kind === 'task' && firstStep.taskId) {
+            setSearchParams({ task: String(firstStep.taskId) }, { replace: true });
+          } else if (firstStep?.kind === 'lecture' && firstStep.lectureId) {
+            setSearchParams({ lecture: String(firstStep.lectureId) }, { replace: true });
+          }
         }
       })
       .catch(console.error);
@@ -411,35 +505,47 @@ export default function CourseLearnPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId, reloadTrigger]);
 
-  // Синхронизируем выбранную задачу со store
   useEffect(() => {
     setSelectedTaskId(selectedTaskId);
   }, [selectedTaskId, setSelectedTaskId]);
 
-  // Список задач для навигации
   const { sidebarItems } = useCourseLearnStore();
+
+  // Все интерактивные шаги (задачи + лекции) для навигации пред/след
+  const stepItems = useMemo(
+    () => sidebarItems.filter((i) => i.kind === 'task' || i.kind === 'lecture'),
+    [sidebarItems],
+  );
   const taskItems = useMemo(
     () => sidebarItems.filter((i) => i.kind === 'task'),
     [sidebarItems],
   );
-  const currentIndex = taskItems.findIndex((t) => t.taskId === selectedTaskId);
 
-  const selectTask = useCallback(
-    (taskId: number) => {
-      setSearchParams({ task: String(taskId) });
+  const currentStepIndex = stepItems.findIndex(
+    (i) =>
+      (i.kind === 'task' && i.taskId === selectedTaskId) ||
+      (i.kind === 'lecture' && i.lectureId === selectedLectureId),
+  );
+  const taskNumber = useMemo(() => {
+    if (selectedTaskId == null) return 0;
+    return taskItems.findIndex((i) => i.taskId === selectedTaskId) + 1;
+  }, [selectedTaskId, taskItems]);
+
+  const selectStep = useCallback(
+    (item: (typeof stepItems)[number]) => {
+      if (item.kind === 'task' && item.taskId) setSearchParams({ task: String(item.taskId) });
+      else if (item.kind === 'lecture' && item.lectureId) setSearchParams({ lecture: String(item.lectureId) });
     },
     [setSearchParams],
   );
 
   const goNext = useCallback(() => {
-    if (currentIndex < taskItems.length - 1 && taskItems[currentIndex + 1].taskId)
-      selectTask(taskItems[currentIndex + 1].taskId!);
-  }, [currentIndex, taskItems, selectTask]);
+    if (currentStepIndex < stepItems.length - 1) selectStep(stepItems[currentStepIndex + 1]);
+  }, [currentStepIndex, stepItems, selectStep]);
 
   const goPrev = useCallback(() => {
-    if (currentIndex > 0 && taskItems[currentIndex - 1].taskId)
-      selectTask(taskItems[currentIndex - 1].taskId!);
-  }, [currentIndex, taskItems, selectTask]);
+    if (currentStepIndex > 0) selectStep(stepItems[currentStepIndex - 1]);
+  }, [currentStepIndex, stepItems, selectStep]);
 
   if (!courseId)
     return (
@@ -448,23 +554,34 @@ export default function CourseLearnPage() {
       </div>
     );
 
+  const currentLecture = selectedLectureId != null ? lectureMap[selectedLectureId] : null;
+
   return (
     <div className="-mx-6 -my-6 lg:-mx-8 lg:-my-8 overflow-hidden bg-surface-50" style={{ height: 'calc(100vh - 0px)' }}>
       {selectedTaskId ? (
         <TaskSolver
           key={selectedTaskId}
           taskId={String(selectedTaskId)}
-          taskNumber={currentIndex + 1}
+          taskNumber={taskNumber}
           totalTasks={taskItems.length}
           onNext={goNext}
           onPrev={goPrev}
           onSolved={reloadCourseData}
         />
+      ) : currentLecture ? (
+        <LectureViewer
+          key={currentLecture.id}
+          lecture={currentLecture}
+          lectureNumber={currentStepIndex + 1}
+          totalItems={stepItems.length}
+          onNext={goNext}
+          onPrev={goPrev}
+        />
       ) : (
         <div className="flex flex-col items-center justify-center h-full gap-3 text-surface-400">
           <span className="text-5xl">📚</span>
           <p className="font-medium text-surface-500">
-            {taskItems.length === 0 ? 'В курсе пока нет задач' : 'Выберите задачу в списке слева'}
+            {stepItems.length === 0 ? 'В курсе пока нет материалов' : 'Выберите шаг в списке слева'}
           </p>
         </div>
       )}

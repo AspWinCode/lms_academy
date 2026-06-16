@@ -18,6 +18,9 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import PersonalTaskPage from './pages/PersonalTaskPage';
 import CourseLearnPage from './pages/CourseLearnPage';
 import CoursesPage from './pages/CoursesPage';
+import ContestsPage from './pages/ContestsPage';
+import ContestDetailPage from './pages/ContestDetailPage';
+import LeaderboardPage from './pages/LeaderboardPage';
 
 export default function App() {
   return (
@@ -34,6 +37,9 @@ export default function App() {
         <Route path="course/:courseId" element={<CourseLearnPage />} />
         <Route path="progress" element={<ProgressPage />} />
         <Route path="profile/:userId" element={<ProfilePage />} />
+        <Route path="contests" element={<ContestsPage />} />
+        <Route path="contests/:contestId" element={<ContestDetailPage />} />
+        <Route path="leaderboard" element={<LeaderboardPage />} />
         <Route path="admin/users" element={<ProtectedRoute requireAdmin><AdminUsersPage /></ProtectedRoute>} />
         <Route path="admin/courses" element={<ProtectedRoute requireAdmin><AdminCoursesPage /></ProtectedRoute>} />
         <Route path="admin/courses/:courseId" element={<ProtectedRoute requireAdmin><AdminCourseEditorPage /></ProtectedRoute>} />

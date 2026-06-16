@@ -154,6 +154,33 @@ class CourseNodeReorderItem(BaseModel):
     sort_order: int
 
 
+# --- Course node content (lecture/theory) ---
+
+
+class CourseNodeContentCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    content: str
+    sort_order: int = 0
+
+
+class CourseNodeContentUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    content: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class CourseNodeContentOut(BaseModel):
+    id: int
+    node_id: int
+    title: str
+    content: str
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # --- Progress ---
 
 

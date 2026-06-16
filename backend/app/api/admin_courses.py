@@ -15,6 +15,7 @@ from app.database import get_db
 from app.middleware.auth_middleware import require_admin
 from app.models.course import Course, CourseStatus
 from app.models.course_node import CourseNode, CourseNodeStatus, CourseNodeType
+from app.models.course_node_content import CourseNodeContent
 from app.models.course_node_task import CourseNodeTask
 from app.models.task import Task, TaskStatus, TaskType, RunnerType
 from app.models.user_course_progress import UserCourseProgress
@@ -23,6 +24,9 @@ from app.schemas.course_hierarchy import (
     CourseAdminOut,
     CourseAdminUpdate,
     CourseNodeCreate,
+    CourseNodeContentCreate,
+    CourseNodeContentOut,
+    CourseNodeContentUpdate,
     CourseNodeMovePayload,
     CourseNodeOut,
     CourseNodeReorderItem,
@@ -615,6 +619,73 @@ async def admin_move_node(
     if payload.new_sort_order is not None:
         node.sort_order = payload.new_sort_order
     await db.flush()
+    return None
+
+
+# --- Admin: Node content (lectures/theory) ---
+
+
+@router.get("/nodes/{node_id}/content", response_model=List[CourseNodeContentOut])
+async def admin_get_node_content(node_id: int, db: AsyncSession = Depends(get_db)):
+    r = await db.execute(
+        select(CourseNodeContent)
+        .where(CourseNodeContent.node_id == node_id)
+        .order_by(CourseNodeContent.sort_order, CourseNodeContent.id)
+    )
+    return [CourseNodeContentOut.model_validate(item) for item in r.scalars().all()]
+
+
+@router.post("/nodes/{node_id}/content", response_model=CourseNodeContentOut, status_code=status.HTTP_201_CREATED)
+async def admin_create_node_content(
+    node_id: int, body: CourseNodeContentCreate, db: AsyncSession = Depends(get_db)
+):
+    r = await db.execute(select(CourseNode).where(CourseNode.id == node_id))
+    if not r.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Node not found")
+    item = CourseNodeContent(
+        node_id=node_id,
+        title=body.title,
+        content=body.content,
+        sort_order=body.sort_order,
+    )
+    db.add(item)
+    await db.flush()
+    await db.refresh(item)
+    return CourseNodeContentOut.model_validate(item)
+
+
+@router.patch("/nodes/{node_id}/content/{content_id}", response_model=CourseNodeContentOut)
+async def admin_update_node_content(
+    node_id: int, content_id: int, body: CourseNodeContentUpdate, db: AsyncSession = Depends(get_db)
+):
+    r = await db.execute(
+        select(CourseNodeContent).where(
+            CourseNodeContent.id == content_id, CourseNodeContent.node_id == node_id
+        )
+    )
+    item = r.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found")
+    for k, v in body.model_dump(exclude_unset=True).items():
+        setattr(item, k, v)
+    await db.flush()
+    await db.refresh(item)
+    return CourseNodeContentOut.model_validate(item)
+
+
+@router.delete("/nodes/{node_id}/content/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def admin_delete_node_content(
+    node_id: int, content_id: int, db: AsyncSession = Depends(get_db)
+):
+    r = await db.execute(
+        select(CourseNodeContent).where(
+            CourseNodeContent.id == content_id, CourseNodeContent.node_id == node_id
+        )
+    )
+    item = r.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found")
+    await db.delete(item)
     return None
 
 

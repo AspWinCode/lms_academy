@@ -12,11 +12,13 @@ from app.database import get_db
 from app.middleware.auth_middleware import get_current_user
 from app.models.course import Course, CourseStatus
 from app.models.course_node import CourseNode, CourseNodeStatus
+from app.models.course_node_content import CourseNodeContent
 from app.models.course_node_task import CourseNodeTask
 from app.models.user import User
 from app.models.user_course_node_task_progress import UserCourseNodeTaskProgress
 from app.models.user_course_progress import UserCourseProgress
 from app.schemas.course_hierarchy import (
+    CourseNodeContentOut,
     CourseNodeTreeOut,
     UserCourseProgressOut,
     UserNodeTaskProgressOut,
@@ -174,3 +176,22 @@ async def student_get_node_tasks_with_progress(
             )
         )
     return result
+
+
+@router.get("/nodes/{node_id}/content", response_model=List[CourseNodeContentOut])
+async def student_get_node_content(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Лекционные материалы узла для студента."""
+    r_node = await db.execute(select(CourseNode).where(CourseNode.id == node_id))
+    node = r_node.scalar_one_or_none()
+    if not node or node.status != CourseNodeStatus.published:
+        raise HTTPException(status_code=404, detail="Node not found")
+
+    r = await db.execute(
+        select(CourseNodeContent)
+        .where(CourseNodeContent.node_id == node_id)
+        .order_by(CourseNodeContent.sort_order, CourseNodeContent.id)
+    )
+    return [CourseNodeContentOut.model_validate(item) for item in r.scalars().all()]
