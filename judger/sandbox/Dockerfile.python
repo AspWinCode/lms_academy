@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+
+RUN pip install --no-cache-dir pytest numpy pandas matplotlib seaborn plotly openpyxl && \
+    rm -rf /root/.cache
+
+RUN useradd -m -s /bin/sh runner
+USER runner
+
+WORKDIR /workspace
